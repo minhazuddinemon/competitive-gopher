@@ -27,10 +27,10 @@ var (
 	waBadge  = lipgloss.NewStyle().Foreground(ColorError).Bold(true).Render("✗ WA")
 	tleBadge = lipgloss.NewStyle().Foreground(ColorWarning).Bold(true).Render("⏳ TLE")
 
-	// lineWidth is the target width (in terminal columns) for dividers and
-	// the outer test-block box. 72 gives comfortable room for the diff
-	// columns without wrapping on a typical 80-col terminal.
-	lineWidth = 72
+	// lineWidth is the target width (in terminal columns) for dividers, the
+	// header row, and the outer test-block box -- kept as one shared
+	// constant so everything stays visually aligned to the same width.
+	lineWidth = 144
 )
 
 // splitRow places left and right on one terminal line, right-aligned.
@@ -69,49 +69,49 @@ func justifyThree(left, mid, right string, totalWidth int) string {
 
 // ─── Header ──────────────────────────────────────────────────────────────────
 
-// RenderHeader draws the full app/problem header:
+// RenderHeaderImages draws the platform icon (left) and gopher icon (right)
+// as real pixel images (kitty graphics protocol via chafa), justified
+// against lineWidth so they sit at the box's left/right edges rather than
+// bunched together. Falls back to plain colored labels, justified the same
+// way, when chafa/kitty support isn't available.
 //
-//  1. Gopher icon (left) and platform icon (right) as real pixel images
-//     (kitty graphics protocol via chafa). Falls back to a plain text label
-//     when chafa is not installed or the terminal doesn't support kitty.
-//  2. Platform badge + problem title + time-limit constraint — all on one
-//     line, immediately below the images.
-//  3. A full-width accent-coloured divider.
-//
-// Assumes the terminal cursor is at row 1 (screen was just cleared).
-func RenderHeader(platform, title string, timeLimitMs int) {
+// Call this first, immediately after clearing the screen -- the text info
+// row (RenderHeaderInfoRow) is separate because it needs the compile
+// result, which isn't known yet at this point.
+func RenderHeaderImages(platform string) {
 	theme := ThemeFor(platform)
 
-	imagesRendered := PrintImages("gopher", theme.IconName, 14, 7)
-	if !imagesRendered {
-		// Plain-text fallback: show coloured glyphs instead of pixel images.
-		gopherLabel := lipgloss.NewStyle().Foreground(ColorGopherAccent).Bold(true).Render("◉ Go Gopher")
-		platformLabel := lipgloss.NewStyle().Foreground(theme.Color).Bold(true).Render("◉ " + theme.Name)
-		fmt.Printf(" %s    %s\n\n", gopherLabel, platformLabel)
+	if PrintImages(theme.IconName, "gopher", 14, 7, lineWidth) {
+		return
 	}
 
-	// Badge + title + constraint — one row, no wrapping needed for typical titles.
+	platformLabel := lipgloss.NewStyle().Foreground(theme.Color).Bold(true).Render("◉ " + theme.Name)
+	gopherLabel := lipgloss.NewStyle().Foreground(ColorGopherAccent).Bold(true).Render("◉ Go Gopher")
+	fmt.Println(splitRow(" "+platformLabel, gopherLabel+" ", lineWidth))
+	fmt.Println()
+}
+
+// RenderHeaderInfoRow prints the platform badge, problem title, time-limit
+// constraint, AND the compile outcome (DONE/FAILED) all on one row -- title
+// info left, compile status right-aligned to lineWidth -- followed by a
+// divider. Call this once the compile result is actually known; print any
+// compiler error text yourself immediately after -- it belongs below this
+// row, not on it.
+func RenderHeaderInfoRow(platform, title string, timeLimitMs int, compiled bool) {
+	theme := ThemeFor(platform)
+
 	badge := theme.Badge()
 	titleText := lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(title)
 	constraint := lipgloss.NewStyle().Foreground(ColorWarning).Bold(true).
 		Render(fmt.Sprintf("⏳ %dms", timeLimitMs))
-	fmt.Printf(" %s  %s   %s\n", badge, titleText, constraint)
+	left := " " + badge + "  " + titleText + "   " + constraint
 
-	fmt.Println(strings.Repeat("─", lineWidth))
-}
-
-// ─── Compile row ─────────────────────────────────────────────────────────────
-
-// RenderCompileRow prints the target source file and compile outcome (DONE /
-// FAILED) as a single right-aligned row, then a divider. Print any compiler
-// error text yourself immediately after — it belongs below this row.
-func RenderCompileRow(target string, ok bool) {
-	left := " 🛠 " + target
-	right := lipgloss.NewStyle().Bold(true).Foreground(ColorSuccess).Render("⚙ DONE")
-	if !ok {
-		right = lipgloss.NewStyle().Bold(true).Foreground(ColorError).Render("⚙ FAILED")
+	status := lipgloss.NewStyle().Bold(true).Foreground(ColorSuccess).Render("⚙ DONE")
+	if !compiled {
+		status = lipgloss.NewStyle().Bold(true).Foreground(ColorError).Render("⚙ FAILED")
 	}
-	fmt.Println(splitRow(left, right, lineWidth))
+
+	fmt.Println(splitRow(left, status, lineWidth))
 	fmt.Println(strings.Repeat("─", lineWidth))
 }
 
@@ -125,7 +125,7 @@ func RenderCompileRow(target string, ok bool) {
 // All three platforms route through here. Collect every CaseOutcome first,
 // then call this once; do NOT call the old RenderCaseTableHeader / RenderCase
 // / RenderSummary functions separately.
-func RenderTestBlock(outcomes []CaseOutcome, allPassed bool, platform string) {
+func RenderTestBlock(outcomes []CaseOutcome, allPassed bool, copiedToClipboard bool, platform string) {
 	theme := ThemeFor(platform)
 	// innerWidth = lineWidth minus 2 border chars and 2 padding chars (1 each side)
 	innerWidth := lineWidth - 4
@@ -154,7 +154,7 @@ func RenderTestBlock(outcomes []CaseOutcome, allPassed bool, platform string) {
 	// ── Pass / fail summary ───────────────────────────────────────────────
 	sb.WriteString(strings.Repeat("─", innerWidth))
 	sb.WriteString("\n")
-	sb.WriteString(summaryStr(allPassed))
+	sb.WriteString(summaryStr(allPassed, copiedToClipboard))
 
 	// ── Outer border box ──────────────────────────────────────────────────
 	box := lipgloss.NewStyle().
@@ -221,11 +221,15 @@ func diffBlockStr(input, expected, got string, width int) string {
 	return diffBox.Render(row)
 }
 
-func summaryStr(allPassed bool) string {
+func summaryStr(allPassed, copiedToClipboard bool) string {
 	if allPassed {
+		label := "  ALL TESTS PASSED"
+		if copiedToClipboard {
+			label += "    📋 Copied to Clipboard"
+		}
 		return " " + lipgloss.NewStyle().Bold(true).
 			Foreground(ColorDarkBg).Background(ColorSuccess).
-			Padding(0, 3).Render("  ALL TESTS PASSED")
+			Padding(0, 3).Render(label)
 	}
 	return " " + lipgloss.NewStyle().Bold(true).
 		Foreground(ColorDarkBg).Background(ColorError).

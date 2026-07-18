@@ -29,9 +29,12 @@ func ClearKittyImages() {
 	fmt.Print("\033_Ga=d\033\\")
 }
 
-// PrintImages renders the gopher and a platform icon side-by-side as real
-// pixel images using chafa's kitty graphics protocol output (requires
-// Konsole 22.04+ or kitty terminal and chafa ≥ 1.12).
+// PrintImages renders two icons side-by-side as real pixel images using
+// chafa's kitty graphics protocol output (requires Konsole 22.04+ or kitty
+// terminal and chafa ≥ 1.12). leftName sits flush against the left edge of
+// boxWidth, rightName flush against the right edge -- i.e. the pair is
+// justified against the same width used for the box/dividers below them,
+// rather than sitting close together with a fixed gap.
 //
 // It assumes the terminal cursor is at row 1 (i.e. the screen was just
 // cleared). After both images are drawn it repositions the cursor to row
@@ -40,7 +43,7 @@ func ClearKittyImages() {
 // Returns true if images were actually rendered, false on any failure
 // (chafa not found, icon not embedded, etc.) so the caller can print a
 // plain-text fallback instead.
-func PrintImages(leftName, rightName string, cols, rows int) bool {
+func PrintImages(leftName, rightName string, cols, rows, boxWidth int) bool {
 	if !chafaAvailable() {
 		return false
 	}
@@ -82,14 +85,20 @@ func PrintImages(leftName, rightName string, cols, rows int) bool {
 		return cmd.Run() == nil
 	}
 
-	const gap = 6 // terminal columns between the two images
+	// Gap between the two images so the right one's right edge lands on
+	// boxWidth -- i.e. justified against the same width as the box/dividers
+	// printed below, rather than a fixed distance between them.
+	gap := boxWidth - 2*cols
+	if gap < 2 {
+		gap = 2
+	}
 
-	// ── Left image (gopher) ──────────────────────────────────────────────
+	// ── Left image ────────────────────────────────────────────────────────
 	// After the kitty sequence is emitted, Konsole places the cursor at
 	// the start of the row immediately below the image (row 1+rows, col 1).
 	leftOK := printIcon(leftData, lErr)
 
-	// ── Right image (platform icon) ──────────────────────────────────────
+	// ── Right image ────────────────────────────────────────────────────────
 	// Move cursor back to the top of the image area, then step right past
 	// the left image + gap so the second image lands beside the first.
 	if leftOK {

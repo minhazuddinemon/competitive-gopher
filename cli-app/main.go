@@ -102,13 +102,14 @@ func main() {
 		// Clear terminal screen for a clean UI update per execution cycle
 		fmt.Print("\033[H\033[2J")
 
-		// Header: gopher + platform logos, platform pill, title + time
-		// limit -- see internal/ui.RenderHeader for the layout.
-		ui.RenderHeader(probData.Platform, probData.Title, probData.TimeLimitMs)
+		// Logos only for now -- the title/constraint/compile-status row
+		// (ui.RenderHeaderInfoRow) prints once we actually know whether
+		// compilation succeeded, further down.
+		ui.RenderHeaderImages(probData.Platform)
 
 		// 1. Compile Phase (silent until the outcome is known -- the
-		// target file + DONE/FAILED status print together as one row via
-		// ui.RenderCompileRow once we actually have a result)
+		// target file + DONE/FAILED status now print together with the title
+		// row via ui.RenderHeaderInfoRow once we actually have a result)
 		var binaryPath string
 		var leetcodeCleanSource string
 		var err error
@@ -121,7 +122,7 @@ func main() {
 
 			details, sigErr := runner.ParseLeetCodeSignature(functionSignature)
 			if sigErr != nil {
-				ui.RenderCompileRow(solutionFile, false)
+				ui.RenderHeaderInfoRow(probData.Platform, probData.Title, probData.TimeLimitMs, false)
 				fmt.Printf("\nSignature Error: %v\n", sigErr)
 				goto ShowMenu
 			}
@@ -136,7 +137,7 @@ func main() {
 				// prefix search below has nothing left to find.
 				jsonMapStr, convErr := runner.ConvertInputToJSONMap(t.Input, details.Params)
 				if convErr != nil {
-					ui.RenderCompileRow(solutionFile, false)
+					ui.RenderHeaderInfoRow(probData.Platform, probData.Title, probData.TimeLimitMs, false)
 					fmt.Printf("\nInput Parsing Error: %v\n", convErr)
 					goto ShowMenu
 				}
@@ -147,7 +148,7 @@ func main() {
 				solutionFile, "", "", probData.OrderMatters, details, rawCases, rawExpecteds,
 			)
 			if prepErr != nil {
-				ui.RenderCompileRow(solutionFile, false)
+				ui.RenderHeaderInfoRow(probData.Platform, probData.Title, probData.TimeLimitMs, false)
 				fmt.Printf("\nSandbox Build Error: %v\n", prepErr)
 				goto ShowMenu
 			}
@@ -155,7 +156,7 @@ func main() {
 
 			binaryPath, err = runner.CompileLeetCodeSandbox(sandboxDir)
 			if err != nil {
-				ui.RenderCompileRow(solutionFile, false)
+				ui.RenderHeaderInfoRow(probData.Platform, probData.Title, probData.TimeLimitMs, false)
 				fmt.Printf("\n%s\n", err.Error())
 
 				// =========================================================================
@@ -185,12 +186,12 @@ func main() {
 		}
 
 		if err != nil {
-			ui.RenderCompileRow(solutionFile, false)
+			ui.RenderHeaderInfoRow(probData.Platform, probData.Title, probData.TimeLimitMs, false)
 			fmt.Printf("\n%s\n", err.Error())
 			goto ShowMenu
 		}
 
-		ui.RenderCompileRow(solutionFile, true)
+		ui.RenderHeaderInfoRow(probData.Platform, probData.Title, probData.TimeLimitMs, true)
 
 		// 2. Test Execution Engine — collect all outcomes first, then
 		// render the entire block at once so it can be wrapped in one box.
@@ -258,13 +259,13 @@ func main() {
 				os.Remove(binaryPath)
 			}
 
-			// Render all cases + summary inside one bordered box.
-			ui.RenderTestBlock(outcomes, allPassed, probData.Platform)
-
 			// On a clean pass, copy the submission-ready code to the
 			// clipboard: the full file for CF/AtCoder, or the
 			// package/import-stripped function body for LeetCode (which is
-			// what LeetCode's own submission box expects).
+			// what LeetCode's own submission box expects). Decided BEFORE
+			// rendering so the box can show it inline instead of a
+			// separate line underneath.
+			copied := false
 			if allPassed {
 				var codeToCopy string
 				if probData.Platform == "leetcode" {
@@ -273,11 +274,13 @@ func main() {
 					codeToCopy = string(raw)
 				}
 				if codeToCopy != "" {
-					if err := clipboard.WriteAll(codeToCopy); err == nil {
-						fmt.Println(lipgloss.NewStyle().Foreground(successColor).Render(" 📋 Solution copied to clipboard — ready to submit."))
-					}
+					copied = clipboard.WriteAll(codeToCopy) == nil
 				}
 			}
+
+			// Render all cases + summary (with clipboard-copied notice, if
+			// any) inside one bordered box.
+			ui.RenderTestBlock(outcomes, allPassed, copied, probData.Platform)
 		}
 
 	ShowMenu:
