@@ -1,0 +1,44 @@
+{
+  "manifest_version": 3,
+  "name": "Competitive Gopher",
+  "version": "1.0.0",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "my-local-extension@gocli.com",
+      "data_collection_permissions": {
+        "required": [ "none" ]
+      }
+    }
+  },
+  "description": "Scrapes problem test cases into clipboard JSON format.",
+  "permissions": ["activeTab", "clipboardWrite"],
+  "action": {
+    "default_icon": {
+      "16": "icons/gopher.png",
+      "48": "icons/gopher.png",
+      "128": "icons/gopher.png"
+    },
+    "default_title": "Competitive Gopher",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://codeforces.com/*",
+        "https://*.codeforces.com/*"
+      ],
+      "js": ["content/codeforces.js"]
+    },
+    {
+      "matches": ["https://leetcode.com/problems/*"],
+      "js": ["content/leetcode.js"]
+    },
+    {
+      "matches": ["https://atcoder.jp/contests/*"],
+      "js": ["content/atcoder.js"]
+    }
+  ]
+}

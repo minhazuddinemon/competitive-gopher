@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <title>Competitive Gopher</title>
+  <style>
+    :root {
+      --bg: #1e1e2e;
+      --card-bg: #252538;
+      --input-bg: #181825;
+      --text: #cdd6f4;
+      --subtext: #a6adc8;
+      --border: #313244;
+      --border-focus: #b4befe;
+      --accent: #cba6f7;
+      --success: #a6e3a1;
+      --danger: #f38ba8;
+      --cf-accent: #89dceb;
+      --ac-accent: #f38ba8;
+      --lc-accent: #f9e2af;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      width: 420px;
+      max-height: 580px;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      border-radius: 8px;
+    }
+
+    /* Custom Scrollbar styling */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: var(--bg);
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--subtext);
+    }
+
+    /* Header Styling */
+    header {
+      padding: 12px 16px;
+      background-color: var(--card-bg);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .brand img {
+      width: 48px;
+      height: 48px;
+      border-radius: 6px;
+      object-fit: contain;
+    }
+
+    .brand h1 {
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      background: linear-gradient(135deg, var(--accent), #b4befe);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .status-pill {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--bg);
+      background-color: var(--success);
+      padding: 3px 8px;
+      border-radius: 12px;
+      opacity: 0;
+      transition: opacity 0.3s ease, transform 0.3s ease;
+      transform: scale(0.9);
+      pointer-events: none;
+    }
+
+    .status-pill.show {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    /* Content Area styling */
+    main {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      flex: 1;
+    }
+
+    /* Messages & States */
+    .state-msg {
+      padding: 24px 16px;
+      text-align: center;
+      background-color: var(--card-bg);
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .state-msg .icon {
+      font-size: 28px;
+    }
+
+    .state-msg p {
+      font-size: 13px;
+      color: var(--subtext);
+      line-height: 1.4;
+    }
+
+    .state-msg .btn-retry {
+      background-color: var(--border);
+      color: var(--text);
+      border: none;
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: background-color 0.2s;
+    }
+
+    .state-msg .btn-retry:hover {
+      background-color: var(--accent);
+      color: var(--bg);
+    }
+
+    /* Problem Info Card */
+    #problem-card {
+      background-color: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .meta-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .platform-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 2px 8px;
+      border-radius: 12px;
+      border: 1px solid;
+    }
+
+    .platform-badge.codeforces {
+      color: var(--cf-accent);
+      border-color: var(--cf-accent);
+    }
+
+    .platform-badge.atcoder {
+      color: var(--ac-accent);
+      border-color: var(--ac-accent);
+    }
+
+    .platform-badge.leetcode {
+      color: var(--lc-accent);
+      border-color: var(--lc-accent);
+    }
+
+    .platform-badge img {
+      width: 32px;
+      height: 32px;
+      object-fit: contain;
+    }
+
+    .time-limit {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--subtext);
+      background-color: var(--input-bg);
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+
+    .problem-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+      line-height: 1.3;
+    }
+
+    /* Leetcode Signature Section */
+    #leetcode-sig-section {
+      display: none;
+      flex-direction: column;
+      gap: 4px;
+      background-color: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+
+    #leetcode-sig-section label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: var(--lc-accent);
+      letter-spacing: 0.5px;
+    }
+
+    .sig-code {
+      font-family: "Consolas", "Monaco", "Fira Code", monospace;
+      font-size: 11px;
+      background-color: var(--input-bg);
+      padding: 6px 8px;
+      border-radius: 4px;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: #b4befe;
+      max-height: 50px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+    }
+
+    /* Testcases List */
+    .section-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--subtext);
+      margin-top: 4px;
+    }
+
+    #testcases-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      max-height: 300px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .testcase-card {
+      background-color: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      position: relative;
+    }
+
+    .testcase-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--accent);
+    }
+
+    .btn-delete {
+      background: none;
+      border: none;
+      color: var(--subtext);
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      padding: 2px 6px;
+      border-radius: 4px;
+      transition: background-color 0.2s, color 0.2s;
+    }
+
+    .btn-delete:hover {
+      background-color: rgba(243, 139, 168, 0.15);
+      color: var(--danger);
+    }
+
+    .testcase-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .field label {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--subtext);
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+
+    .field textarea {
+      font-family: "Consolas", "Monaco", "Fira Code", monospace;
+      font-size: 11px;
+      background-color: var(--input-bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 6px;
+      height: 70px;
+      resize: none;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .field textarea:focus {
+      border-color: var(--border-focus);
+    }
+
+    /* Actions Styling */
+    .actions {
+      padding: 12px 16px 16px 16px;
+      background-color: var(--bg);
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: center;
+      position: sticky;
+      bottom: 0;
+    }
+
+    .btn-add {
+      background: linear-gradient(135deg, var(--accent), #b4befe);
+      color: var(--bg);
+      border: none;
+      padding: 8px 16px;
+      font-size: 12px;
+      font-weight: 700;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: transform 0.15s, opacity 0.2s;
+      box-shadow: 0 4px 10px rgba(203, 166, 247, 0.2);
+    }
+
+    .btn-add:hover {
+      transform: translateY(-1px);
+      opacity: 0.95;
+    }
+
+    .btn-add:active {
+      transform: translateY(1px);
+    }
+
+    .btn-add svg {
+      width: 14px;
+      height: 14px;
+      fill: var(--bg);
+    }
+
+    /* Loading Spinner */
+    .spinner {
+      border: 3px solid rgba(255, 255, 255, 0.1);
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      border-left-color: var(--accent);
+      animation: spin 1s linear infinite;
+      margin-bottom: 8px;
+    }
+
+    @keyframes spin {
+      0% {
+        transform: rotate(0deg);
+      }
+
+      100% {
+        transform: rotate(360deg);
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <header>
+    <div class="brand">
+      <img src="icons/gopher.png" alt="Gopher">
+      <h1>Competitive Gopher</h1>
+    </div>
+    <div id="status-pill" class="status-pill">✓ Copied</div>
+  </header>
+
+  <main id="app-container">
+    <!-- States (Loading, Error, Active) will be rendered here dynamically -->
+    <div class="state-msg" id="loading-state">
+      <div class="spinner"></div>
+      <p>Scraping problem description & cases...</p>
+    </div>
+  </main>
+
+  <div class="actions" id="actions-bar" style="display: none;">
+    <button class="btn-add" id="btn-add-case">
+      <svg viewBox="0 0 24 24">
+        <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
+      </svg>
+      Add Custom Case
+    </button>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+
+</html>
