@@ -17,7 +17,19 @@ import (
 // -- cleanedSource is your solution with package/import/main stripped,
 // exactly the shape LeetCode's submission box expects, so callers can
 // clipboard-copy it on an all-pass run without re-deriving it.
-func PrepareLeetCodeSandbox(userSourcePath string, inputJSON string, expectedJSON string, orderMatters bool, details *LeetCodeFuncDetails, processedCases []string, expecteds []string) (string, string, error) {
+//
+// inPlace/targetParam handle LeetCode's "modify the input in place" problems
+// (e.g. #31 Next Permutation, #88 Merge Sorted Array, #26/#27/#80 Remove
+// Duplicates/Element, #189 Rotate Array, #283 Move Zeroes). These functions
+// either return nothing at all, or return an int representing a new
+// logical length rather than the actual answer — so the normal "got :=
+// solutionFunc(args)" call doesn't produce a comparable value at all, or
+// compares against the wrong thing. When inPlace is true, the harness
+// instead calls the function for its side effect and then reads back
+// targetParam (or the first slice-typed parameter, if targetParam is
+// empty) as the actual result — truncating it to the returned length
+// first, if the function does return one.
+func PrepareLeetCodeSandbox(userSourcePath string, inputJSON string, expectedJSON string, orderMatters bool, inPlace bool, targetParam string, details *LeetCodeFuncDetails, processedCases []string, expecteds []string) (string, string, error) {
 	// 1. Create a stable, hidden sandbox path in the system cache/temp directory
 	sandboxDir := filepath.Join(os.TempDir(), "go-cp-cli-sandbox")
 	if err := os.MkdirAll(sandboxDir, 0755); err != nil {
@@ -78,6 +90,14 @@ func PrepareLeetCodeSandbox(userSourcePath string, inputJSON string, expectedJSO
 		functionArgs.WriteString(param.Name)
 	}
 
+	// 5.5. Decide how the function is actually invoked and what type the
+	// "expected" value should be unmarshaled into. This is the part that
+	// differs between normal return-value problems and in-place problems.
+	execSnippet, expectedType, err := buildExecSnippet(details, inPlace, targetParam, functionArgs.String())
+	if err != nil {
+		return "", "", err
+	}
+
 	// 6. Get the raw template structure
 	harnessTemplate := GetLeetCodeHarnessTemplate()
 
@@ -92,9 +112,8 @@ func PrepareLeetCodeSandbox(userSourcePath string, inputJSON string, expectedJSO
 		len(processedCases), // expectedCaseCount — lets the harness self-report if it silently ran 0 cases
 		varDeclarations.String(),
 		unmarshalBlocks.String(),
-		details.Returns[0],
-		details.Name,
-		functionArgs.String(),
+		expectedType,
+		execSnippet,
 	)
 
 	// 7. Write the unified file directly into the hidden folder
@@ -127,6 +146,94 @@ func PrepareLeetCodeSandbox(userSourcePath string, inputJSON string, expectedJSO
 	}
 
 	return sandboxDir, userCodeString, nil
+}
+
+// buildExecSnippet returns the Go source line(s) that invoke the user's
+// solution function and assign the comparable result to "got", plus the
+// Go type "expected" should be unmarshaled into.
+//
+// Three shapes are handled:
+//
+//  1. Normal (inPlace=false): got := solutionFunc(args). expectedType is
+//     the function's own single return type. This is the original/only
+//     behavior before in-place support was added.
+//
+//  2. In-place, void return (e.g. nextPermutation, rotate, moveZeroes,
+//     merge): the function is called for its side effect only, then "got"
+//     is read back from targetParam directly. expectedType is
+//     targetParam's own declared type.
+//
+//  3. In-place, int return representing a new logical length (e.g.
+//     removeDuplicates, removeElement): the function's return value is
+//     used to truncate targetParam — got := targetParam[:k]. expectedType
+//     is still targetParam's declared type, since that's the shape of the
+//     truncated slice, not the int itself.
+func buildExecSnippet(details *LeetCodeFuncDetails, inPlace bool, targetParam string, argsStr string) (execSnippet string, expectedType string, err error) {
+	if !inPlace {
+		if len(details.Returns) == 0 {
+			return "", "", fmt.Errorf(
+				"function %s has no return value, so its result can't be checked. "+
+					"If this is an in-place problem (it modifies one of its arguments "+
+					"instead of returning a value), mark it In-Place and set a target "+
+					"parameter in the extension popup", details.Name)
+		}
+		execSnippet = fmt.Sprintf("got := %s(%s)", details.Name, argsStr)
+		expectedType = details.Returns[0]
+		return execSnippet, expectedType, nil
+	}
+
+	// Resolve which parameter to read back after the call.
+	resolvedTarget := targetParam
+	if resolvedTarget == "" {
+		p, ok := firstSliceParam(details.Params)
+		if !ok {
+			return "", "", fmt.Errorf(
+				"marked In-Place but no target parameter was set and no slice-typed "+
+					"parameter was found on %s to default to — set a target parameter "+
+					"in the extension popup", details.Name)
+		}
+		resolvedTarget = p.Name
+	}
+
+	targetType, ok := findParamType(details.Params, resolvedTarget)
+	if !ok {
+		return "", "", fmt.Errorf(
+			"target parameter %q not found in %s's parameter list", resolvedTarget, details.Name)
+	}
+	expectedType = targetType
+
+	if len(details.Returns) == 0 {
+		// Void mutation — e.g. func nextPermutation(nums []int)
+		execSnippet = fmt.Sprintf("%s(%s)\n\t\tgot := %s", details.Name, argsStr, resolvedTarget)
+	} else {
+		// Returns a new logical length — e.g. func removeDuplicates(nums []int) int
+		execSnippet = fmt.Sprintf("__newLen := %s(%s)\n\t\tgot := %s[:__newLen]", details.Name, argsStr, resolvedTarget)
+	}
+	return execSnippet, expectedType, nil
+}
+
+// findParamType looks up a parameter's declared type by name.
+func findParamType(params []ParamInfo, name string) (string, bool) {
+	for _, p := range params {
+		if p.Name == name {
+			return p.Type, true
+		}
+	}
+	return "", false
+}
+
+// firstSliceParam returns the first parameter whose type looks like a
+// slice ("[]..."), used as the default in-place target when none is set
+// explicitly. This matches every known LeetCode in-place problem (#26,
+// #27, #31, #80, #88, #189, #283): the mutated argument is always the
+// first slice-typed parameter in the signature.
+func firstSliceParam(params []ParamInfo) (ParamInfo, bool) {
+	for _, p := range params {
+		if strings.HasPrefix(p.Type, "[]") {
+			return p, true
+		}
+	}
+	return ParamInfo{}, false
 }
 
 // CompileLeetCodeSandbox runs the compiler inside the hidden workspace using "."
@@ -195,7 +302,7 @@ func main() {
 		_ = unmarshalFlexible(expecteds[i], &expected)
 
 		// Execute User Code
-		got := %s(%s)
+		%s
 
 		if !orderMatters {
 			normalizeOrdering(reflect.ValueOf(got))

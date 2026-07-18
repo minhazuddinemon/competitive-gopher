@@ -145,7 +145,7 @@ func main() {
 				rawExpecteds = append(rawExpecteds, t.Expected)
 			} // Build and compile the hidden sandbox
 			sandboxDir, cleanedSource, prepErr := runner.PrepareLeetCodeSandbox(
-				solutionFile, "", "", probData.OrderMatters, details, rawCases, rawExpecteds,
+				solutionFile, "", "", probData.OrderMatters, probData.InPlace, probData.TargetParam, details, rawCases, rawExpecteds,
 			)
 			if prepErr != nil {
 				ui.RenderHeaderInfoRow(probData.Platform, probData.Title, probData.TimeLimitMs, false)

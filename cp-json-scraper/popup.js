@@ -125,6 +125,14 @@ function initScraping() {
         if (problemData.order_matters === undefined) {
           problemData.order_matters = true;
         }
+        // Same for in-place detection — scraper sets these for LeetCode,
+        // but guard against an older/failed scrape not setting them at all.
+        if (problemData.in_place === undefined) {
+          problemData.in_place = false;
+        }
+        if (problemData.target_param === undefined) {
+          problemData.target_param = "";
+        }
 
         // Auto-copy initial payload immediately
         triggerClipboardUpdate();
@@ -205,6 +213,19 @@ function renderMainLayout() {
     <div id="leetcode-sig-section">
       <label>Function Signature (LeetCode)</label>
       <div class="sig-code" id="sig-code-box"></div>
+
+      <div class="inplace-row">
+        <span class="inplace-row-label">
+          In-Place Algorithm
+        </span>
+        <input type="checkbox" id="chk-inplace" class="inplace-toggle" ${problemData.in_place ? "checked" : ""}>
+      </div>
+
+      <div class="inplace-target-row ${problemData.in_place ? "show" : ""}" id="inplace-target-row">
+        <label>Target Parameter</label>
+        <input type="text" id="input-target-param" placeholder="e.g. nums" value="${escapeHtml(problemData.target_param || "")}">
+        <span class="hint">Leave blank to auto-detect the first slice/array argument.</span>
+      </div>
     </div>
 
     <div class="section-title">Test Cases</div>
@@ -234,6 +255,25 @@ function renderMainLayout() {
     sigSection.style.display = "flex";
     document.getElementById("sig-code-box").innerText =
       problemData.function_signature;
+
+    // In-Place toggle: flips problemData.in_place and shows/hides the
+    // target-parameter field without a full re-render (keeps focus state
+    // consistent with the order-toggle pattern above).
+    const inplaceToggle = document.getElementById("chk-inplace");
+    const targetRow = document.getElementById("inplace-target-row");
+    inplaceToggle.addEventListener("change", (e) => {
+      problemData.in_place = e.target.checked;
+      targetRow.classList.toggle("show", e.target.checked);
+      triggerClipboardUpdate();
+    });
+
+    // Target parameter field: free text, blank means "let the CLI
+    // auto-detect the first slice-typed parameter".
+    const targetInput = document.getElementById("input-target-param");
+    targetInput.addEventListener("input", (e) => {
+      problemData.target_param = e.target.value.trim();
+      triggerClipboardUpdate();
+    });
   } else {
     sigSection.style.display = "none";
   }

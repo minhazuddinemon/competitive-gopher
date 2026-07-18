@@ -93,6 +93,14 @@ async function scrapeLeetCode() {
       signature = extractSignature(editorCode);
     }
 
+    // Detect "in-place" problems (e.g. #31 Next Permutation, #88 Merge
+    // Sorted Array, #26/#27/#80 Remove Duplicates/Element, #189 Rotate
+    // Array, #283 Move Zeroes). These mutate an argument instead of (or as
+    // well as) returning a value, which the CLI's default harness can't
+    // check correctly — it needs to know to read the mutated argument back
+    // afterward rather than trust the function's own return value alone.
+    const { inPlace, targetParam } = detectInPlace(signature);
+
     return {
       platform: "leetcode",
       title: title,
@@ -102,11 +110,78 @@ async function scrapeLeetCode() {
       memory_limit_mb: 256,
       tests: tests,
       function_signature: signature,
+      in_place: inPlace,
+      target_param: targetParam,
     };
   } catch (err) {
     console.error("LeetCode scraping failed:", err);
     return null;
   }
+}
+
+// detectInPlace looks for two independent signals that a problem expects an
+// in-place modification, and combines them with a best-guess at which
+// parameter gets mutated:
+//
+//  1. Explicit text: the description literally says "in-place" / "in
+//     place" (case-insensitive) -- LeetCode almost always links this phrase
+//     straight to https://en.wikipedia.org/wiki/In-place_algorithm, so that
+//     link is checked too as stronger confirmation than the bare phrase.
+//  2. A best-guess target parameter: the first slice/array-typed parameter
+//     in the signature (e.g. "nums" in "nums []int, target int") -- this
+//     matches every well-known LeetCode in-place problem (26, 27, 31, 80,
+//     88, 189, 283), since the mutated argument is always the first array
+//     parameter.
+//
+// This is a heuristic default, not a guarantee -- the popup UI lets the
+// user flip in_place and set target_param manually for anything this
+// misses or gets wrong.
+function detectInPlace(signature) {
+  const bodyText = (
+    document.querySelector('div[data-track-load="description_content"]')
+      ?.innerText || ""
+  ).toLowerCase();
+
+  const mentionsInPlace =
+    bodyText.includes("in-place") || bodyText.includes("in place");
+
+  const hasWikipediaLink = Array.from(document.querySelectorAll("a")).some(
+    (a) => (a.href || "").includes("wikipedia.org/wiki/In-place_algorithm"),
+  );
+
+  const inPlace = mentionsInPlace || hasWikipediaLink;
+
+  let targetParam = "";
+  if (inPlace) {
+    targetParam = guessFirstSliceParam(signature);
+  }
+
+  return { inPlace, targetParam };
+}
+
+// guessFirstSliceParam extracts the first parameter whose type looks like a
+// Go slice (e.g. "[]int") from a signature string like
+// "func merge(nums1 []int, m int, nums2 []int, n int)". Returns "" if none
+// is found or the signature can't be parsed, leaving target_param empty so
+// the CLI falls back to its own auto-detection (or the user sets it
+// manually in the popup).
+function guessFirstSliceParam(signature) {
+  const parenStart = signature.indexOf("(");
+  const parenEnd = signature.indexOf(")");
+  if (parenStart === -1 || parenEnd === -1 || parenEnd <= parenStart) {
+    return "";
+  }
+  const paramsStr = signature.slice(parenStart + 1, parenEnd);
+  const params = paramsStr.split(",").map((p) => p.trim());
+
+  for (const param of params) {
+    // Each param looks like "name []int" or "name int" etc.
+    const parts = param.split(/\s+/);
+    if (parts.length >= 2 && parts[1].startsWith("[]")) {
+      return parts[0];
+    }
+  }
+  return "";
 }
 
 async function getSnippets(titleSlug) {
