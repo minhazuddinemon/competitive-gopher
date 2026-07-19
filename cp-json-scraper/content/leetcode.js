@@ -21,28 +21,66 @@ async function scrapeLeetCode() {
       document.querySelector("span.text-title-large")?.innerText ||
       "LeetCode Problem";
 
-    // Extract test cases from text sample code boxes
-    const preBlocks = document.querySelectorAll(
-      'div[data-track-load="description_content"] pre',
+    // Extract test cases directly from the description container's text.
+    // Older LeetCode problem pages wrap each "Input:/Output:" example in a
+    // single <pre> block, but newer redesigned pages (like this one) print
+    // "Example N:", "Input:", "Output:", "Explanation:" as separate plain
+    // lines with no <pre> at all -- querying for <pre> then finds nothing
+    // and the scraper silently returns zero tests. innerText flattens
+    // whatever markup is actually used either way, so splitting on
+    // "Example N:" markers over the raw text works for both formats.
+    const descContainer = document.querySelector(
+      'div[data-track-load="description_content"]',
     );
+    const fullText = descContainer ? descContainer.innerText : "";
+
     let tests = [];
+    const exampleMarkers = [...fullText.matchAll(/Example\s*\d+:?/gi)];
 
-    preBlocks.forEach((block) => {
-      const text = block.innerText;
-      if (text.includes("Input:") && text.includes("Output:")) {
-        const inputMatch = text.match(/Input:\s*([\s\S]*?)(?=Output:)/);
-        const outputMatch = text.match(
-          /Output:\s*([\s\S]*?)(?=Explanation:|Example|\n\n|$)/,
-        );
+    for (let i = 0; i < exampleMarkers.length; i++) {
+      const start = exampleMarkers[i].index;
+      const end =
+        i + 1 < exampleMarkers.length
+          ? exampleMarkers[i + 1].index
+          : fullText.length;
+      const chunk = fullText.slice(start, end);
 
-        if (inputMatch && outputMatch) {
-          tests.push({
-            input: inputMatch[1].trim() + "\n",
-            expected: outputMatch[1].trim() + "\n",
-          });
-        }
+      const inputMatch = chunk.match(/Input:\s*([\s\S]*?)(?=Output:)/i);
+      const outputMatch = chunk.match(
+        /Output:\s*([\s\S]*?)(?=Explanation:|Constraints:|$)/i,
+      );
+
+      if (inputMatch && outputMatch) {
+        tests.push({
+          input: inputMatch[1].trim() + "\n",
+          expected: outputMatch[1].trim() + "\n",
+        });
       }
-    });
+    }
+
+    // Fallback for any layout this doesn't anticipate: the old <pre>-based
+    // extraction, in case a page mixes formats or the container selector
+    // above changes again in the future.
+    if (tests.length === 0) {
+      const preBlocks = document.querySelectorAll(
+        'div[data-track-load="description_content"] pre',
+      );
+      preBlocks.forEach((block) => {
+        const text = block.innerText;
+        if (text.includes("Input:") && text.includes("Output:")) {
+          const inputMatch = text.match(/Input:\s*([\s\S]*?)(?=Output:)/);
+          const outputMatch = text.match(
+            /Output:\s*([\s\S]*?)(?=Explanation:|Example|\n\n|$)/,
+          );
+          if (inputMatch && outputMatch) {
+            tests.push({
+              input: inputMatch[1].trim() + "\n",
+              expected: outputMatch[1].trim() + "\n",
+            });
+          }
+        }
+      });
+    }
 
     if (tests.length === 0) {
       return null;

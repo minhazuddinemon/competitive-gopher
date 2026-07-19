@@ -201,8 +201,25 @@ func main() {
 
 			if probData.Platform == "leetcode" {
 				cmd := exec.Command(binaryPath)
-				output, _ := cmd.CombinedOutput()
+				output, runErr := cmd.CombinedOutput()
 				outputStr := string(output)
+
+				// If the binary produced literally no output, the harness never
+				// even reached its first Printf — either it failed to launch at
+				// all (bad binary path, missing exec permission, etc.) or it
+				// panicked before printing anything. Either way, runErr (which
+				// was previously discarded) is the only place that information
+				// exists, so surface it instead of silently showing an empty box.
+				if strings.TrimSpace(outputStr) == "" {
+					allPassed = false
+					fmt.Println(lipgloss.NewStyle().Foreground(errorColor).Bold(true).
+						Render("🚨 Sandbox binary produced no output at all."))
+					if runErr != nil {
+						fmt.Printf("   Execution error: %v\n", runErr)
+					} else {
+						fmt.Println("   The process exited cleanly but printed nothing — check runner_main.go for a silent early return or an empty rawCases/rawExpecteds payload.")
+					}
+				}
 
 				// Safety check: harness self-reports EXPECTED_CASES / EXECUTED_CASES.
 				// A silent parsing failure (0 cases run) would otherwise look like
@@ -224,6 +241,18 @@ func main() {
 					allPassed = false
 					fmt.Println(lipgloss.NewStyle().Foreground(errorColor).Bold(true).
 						Render("Could not confirm test cases executed (missing EXECUTED_CASES/EXPECTED_CASES marker)."))
+					// The markers being missing usually means the binary crashed
+					// mid-run (e.g. a panic from the user's solution, or a slice-
+					// bounds panic from the in-place []T[:k] truncation). Dump
+					// whatever raw output DID come out — including any Go panic
+					// stack trace — since that's the only way to see why.
+					if strings.TrimSpace(outputStr) != "" {
+						fmt.Println(lipgloss.NewStyle().Foreground(warningColor).Bold(true).
+							Render("   Raw sandbox output:"))
+						for _, line := range strings.Split(strings.TrimRight(outputStr, "\n"), "\n") {
+							fmt.Println("   " + line)
+						}
+					}
 				} else if executed != expected || executed != len(probData.Tests) {
 					allPassed = false
 					fmt.Println(lipgloss.NewStyle().Foreground(errorColor).Bold(true).Render(

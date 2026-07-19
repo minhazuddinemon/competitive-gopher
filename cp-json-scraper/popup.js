@@ -8,12 +8,14 @@ const PLATFORM_ICONS = {
   codeforces: "icons/codeforces.png",
   atcoder: "icons/atcoder.png",
   leetcode: "icons/leetcode.png",
+  cses: "icons/cses.png",
 };
 
 const PLATFORM_NAMES = {
   codeforces: "Codeforces",
   atcoder: "AtCoder",
   leetcode: "LeetCode",
+  cses: "CSES",
 };
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -98,49 +100,67 @@ function initScraping() {
       platform = "atcoder";
     } else if (url.includes("leetcode.com")) {
       platform = "leetcode";
+    } else if (url.includes("cses.fi")) {
+      platform = "cses";
     }
 
     if (!platform) {
       showError(
-        "Please open a problem page on Codeforces, AtCoder, or LeetCode.",
+        "Please open a problem page on Codeforces, AtCoder, LeetCode, or CSES.",
       );
       return;
     }
 
-    // Send scrape request message to content script
-    chrome.tabs.sendMessage(
-      activeTab.id,
-      { action: "START_SCRAPING" },
-      (response) => {
-        if (chrome.runtime.lastError || !response || !response.success) {
-          showError(
-            "Scraper could not connect to page. Try refreshing the problem tab.",
-          );
-          return;
-        }
+    // Send scrape request message to content script. The very first
+    // sendMessage call after the extension has been idle can fail with
+    // "could not connect" purely due to a Firefox timing quirk -- the
+    // internal messaging route between popup and content script isn't
+    // always warmed up yet on that first call, even though the content
+    // script itself is present and listening. Retrying once after a short
+    // delay papers over that cold-start race instead of surfacing an
+    // error the user would just "fix" by clicking again anyway.
+    sendScrapeMessageWithRetry(activeTab.id, 2);
+  });
+}
 
-        problemData = response.data;
+function sendScrapeMessageWithRetry(tabId, attemptsLeft) {
+  chrome.tabs.sendMessage(tabId, { action: "START_SCRAPING" }, (response) => {
+    const failed = chrome.runtime.lastError || !response || !response.success;
 
-        // Enforce default baseline contract for result collection ordering
-        if (problemData.order_matters === undefined) {
-          problemData.order_matters = true;
-        }
-        // Same for in-place detection — scraper sets these for LeetCode,
-        // but guard against an older/failed scrape not setting them at all.
-        if (problemData.in_place === undefined) {
-          problemData.in_place = false;
-        }
-        if (problemData.target_param === undefined) {
-          problemData.target_param = "";
-        }
+    if (failed && attemptsLeft > 0) {
+      setTimeout(() => {
+        sendScrapeMessageWithRetry(tabId, attemptsLeft - 1);
+      }, 250);
+      return;
+    }
 
-        // Auto-copy initial payload immediately
-        triggerClipboardUpdate();
+    if (failed) {
+      showError(
+        "Scraper could not connect to page. Try refreshing the problem tab.",
+      );
+      return;
+    }
 
-        // Display UI elements
-        renderMainLayout();
-      },
-    );
+    problemData = response.data;
+
+    // Enforce default baseline contract for result collection ordering
+    if (problemData.order_matters === undefined) {
+      problemData.order_matters = true;
+    }
+    // Same for in-place detection — scraper sets these for LeetCode,
+    // but guard against an older/failed scrape not setting them at all.
+    if (problemData.in_place === undefined) {
+      problemData.in_place = false;
+    }
+    if (problemData.target_param === undefined) {
+      problemData.target_param = "";
+    }
+
+    // Auto-copy initial payload immediately
+    triggerClipboardUpdate();
+
+    // Display UI elements
+    renderMainLayout();
   });
 }
 

@@ -6,7 +6,7 @@
     "gecko": {
       "id": "my-local-extension@gocli.com",
       "data_collection_permissions": {
-        "required": [ "none" ]
+        "required": ["none"]
       }
     }
   },
@@ -26,10 +26,7 @@
   },
   "content_scripts": [
     {
-      "matches": [
-        "https://codeforces.com/*",
-        "https://*.codeforces.com/*"
-      ],
+      "matches": ["https://codeforces.com/*", "https://*.codeforces.com/*"],
       "js": ["content/codeforces.js"]
     },
     {
@@ -39,6 +36,10 @@
     {
       "matches": ["https://atcoder.jp/contests/*"],
       "js": ["content/atcoder.js"]
+    },
+    {
+      "matches": ["https://cses.fi/problemset/task/*"],
+      "js": ["content/cses.js"]
     }
   ]
 }

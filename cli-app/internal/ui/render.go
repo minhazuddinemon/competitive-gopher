@@ -52,14 +52,8 @@ func justifyThree(left, mid, right string, totalWidth int) string {
 	mw := lipgloss.Width(mid)
 	rw := lipgloss.Width(right)
 
-	midStart := (totalWidth - mw) / 2
-	if midStart < lw+2 {
-		midStart = lw + 2
-	}
-	rightStart := totalWidth - rw
-	if rightStart < midStart+mw+2 {
-		rightStart = midStart + mw + 2
-	}
+	midStart := max((totalWidth - mw) / 2, lw + 2)
+	rightStart := max(totalWidth - rw, midStart + mw + 2)
 
 	gap1 := max(midStart-lw, 1)
 	gap2 := max(rightStart-(midStart+mw), 1)

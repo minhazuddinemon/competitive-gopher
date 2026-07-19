@@ -88,10 +88,7 @@ func PrintImages(leftName, rightName string, cols, rows, boxWidth int) bool {
 	// Gap between the two images so the right one's right edge lands on
 	// boxWidth -- i.e. justified against the same width as the box/dividers
 	// printed below, rather than a fixed distance between them.
-	gap := boxWidth - 2*cols
-	if gap < 2 {
-		gap = 2
-	}
+	gap := max(boxWidth-2*cols, 2)
 
 	// ── Left image ────────────────────────────────────────────────────────
 	// After the kitty sequence is emitted, Konsole places the cursor at
