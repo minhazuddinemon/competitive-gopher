@@ -10,6 +10,7 @@ type ProblemData struct {
 	FunctionSignature string     `json:"function_signature"` // LeetCode specific
 	InPlace           bool       `json:"in_place"`           // LeetCode specific — function mutates an argument instead of (or in addition to) returning a value
 	TargetParam       string     `json:"target_param"`       // LeetCode specific — name of the parameter to inspect after the call when InPlace is true; empty = auto-detect the first slice-typed parameter
+	ProblemID         string     `json:"problem_id"`         // CSES specific — task ID from the URL, used to look up the local test bank on disk
 	Tests             []TestCase `json:"tests"`
 }
 

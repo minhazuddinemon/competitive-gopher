@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings" // Added for error checking
 	"time"
 
 	"go-cp-cli/cli-app/internal/parser"
@@ -29,10 +30,8 @@ func CompileSolution(sourceFile string) (string, error) {
 		return "", fmt.Errorf("source file %s does not exist", sourceFile)
 	}
 
-	// Create a unique temporary binary name in the same directory
 	binaryName := "./temp_solution_bin"
 
-	// Execute: go build -o ./temp_solution_bin solution.go
 	cmd := exec.Command("go", "build", "-o", binaryName, sourceFile)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -42,7 +41,6 @@ func CompileSolution(sourceFile string) (string, error) {
 		return "", fmt.Errorf("compilation failed:\n%s", stderr.String())
 	}
 
-	// Get full path to make executing it highly reliable
 	absPath, err := filepath.Abs(binaryName)
 	if err != nil {
 		return binaryName, nil
@@ -50,8 +48,8 @@ func CompileSolution(sourceFile string) (string, error) {
 	return absPath, nil
 }
 
-// ExecuteTest runs the compiled binary against a single input string with a strict timeout.
-func ExecuteTest(caseNum int, binaryPath string, test parser.TestCase, timeoutMs int) RunResult {
+// ExecuteTest runs the compiled binary inside a strict systemd cgroup container
+func ExecuteTest(caseNum int, binaryPath string, test parser.TestCase, timeoutMs int, memoryLimitMb int) RunResult {
 	result := RunResult{
 		CaseNum:  caseNum,
 		Input:    test.Input,
@@ -62,9 +60,16 @@ func ExecuteTest(caseNum int, binaryPath string, test parser.TestCase, timeoutMs
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMs)*time.Millisecond)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, binaryPath)
+	// Approach 3: Wrap the execution using systemd-run to box and enforce memory limits at the kernel level
+	cmd := exec.CommandContext(ctx,
+		"systemd-run",
+		"--user",
+		"--scope",
+		"-q",
+		"-p", fmt.Sprintf("MemoryMax=%dM", memoryLimitMb),
+		binaryPath,
+	)
 
-	// Set up pipes for standard input/output
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -83,11 +88,16 @@ func ExecuteTest(caseNum int, binaryPath string, test parser.TestCase, timeoutMs
 
 	if err != nil {
 		result.Passed = false
-		result.Got = "RUNTIME ERROR:\n" + stderr.String()
+
+		// If the kernel OOM killer or systemd terminates the scope, it receives a SIGKILL (signal: killed)
+		if strings.Contains(err.Error(), "signal: killed") {
+			result.Got = fmt.Sprintf("MEMORY LIMIT EXCEEDED (> %d MB)", memoryLimitMb)
+		} else {
+			result.Got = "RUNTIME ERROR:\n" + stderr.String()
+		}
 		return result
 	}
 
-	// Clean and normalize trailing lines/spaces for evaluation
 	gotStr := normalizeOutput(stdout.String())
 	expectedStr := normalizeOutput(test.Expected)
 
@@ -97,9 +107,8 @@ func ExecuteTest(caseNum int, binaryPath string, test parser.TestCase, timeoutMs
 	return result
 }
 
-// normalizeOutput strips weird carriage returns and trims excessive whitespace blocks
 func normalizeOutput(s string) string {
-	s = os.ExpandEnv(s) // clear variables if any
+	s = os.ExpandEnv(s)
 	lines := bytes.Split([]byte(s), []byte("\n"))
 	var cleanedLines [][]byte
 

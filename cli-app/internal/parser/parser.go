@@ -35,8 +35,8 @@ func ParseClipboardJSON(rawJSON string) (*ProblemData, error) {
 		return nil, errors.New("clipboard content is not valid CP JSON format")
 	}
 
-	// Ensure we are filtering out unsupported platforms
-	if data.Platform != "codeforces" && data.Platform != "atcoder" && data.Platform != "leetcode" {
+	// Ensure we are filtering out unsupported platforms (Now including CSES)
+	if data.Platform != "codeforces" && data.Platform != "atcoder" && data.Platform != "leetcode" && data.Platform != "cses" {
 		return nil, errors.New("unsupported platform found on clipboard: " + data.Platform)
 	}
 

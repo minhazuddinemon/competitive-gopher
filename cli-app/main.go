@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -84,16 +85,28 @@ func main() {
 	// Track active selection index for the menu
 	menuCursorIndex := 0
 
-	menuItems := []MenuItem{
-		{Key: "run", Label: "Run Again"},
-		{Key: "add", Label: "Add Custom Test Case"},
-		{Key: "remove", Label: "Remove Test Case"},
-		{Key: "reload", Label: "Reload from Clipboard"},
-		{Key: "exit", Label: "Exit"},
-	}
-
 	// Main Persistent State Machine Loop
 	for {
+		// Rebuilt every iteration (not once, before the loop) because
+		// "Reload from Clipboard" can change probData.Platform/ProblemID
+		// mid-session, and Run All Test Cases should only appear when a
+		// local CSES test bank actually exists for the current problem.
+		menuItems := []MenuItem{
+			{Key: "run", Label: "Run Again"},
+			{Key: "add", Label: "Add Custom Test Case"},
+			{Key: "remove", Label: "Remove Test Case"},
+		}
+		if probData.Platform == "cses" && runner.HasCSESTestBank(probData.ProblemID) {
+			menuItems = append(menuItems, MenuItem{Key: "runall", Label: "Run All Test Cases"})
+		}
+		menuItems = append(menuItems,
+			MenuItem{Key: "reload", Label: "Reload from Clipboard"},
+			MenuItem{Key: "exit", Label: "Exit"},
+		)
+		if menuCursorIndex >= len(menuItems) {
+			menuCursorIndex = 0
+		}
+
 		// Clear kitty pixel images from the previous frame before erasing
 		// the screen. Kitty/sixel graphics live in a compositor layer that
 		// a plain "erase screen" escape doesn't touch, so without this they
@@ -200,7 +213,14 @@ func main() {
 			var outcomes []ui.CaseOutcome
 
 			if probData.Platform == "leetcode" {
-				cmd := exec.Command(binaryPath)
+				// Wrap LeetCode sandbox execution with systemd-run limits
+				cmd := exec.Command("systemd-run",
+					"--user",
+					"--scope",
+					"-q",
+					"-p", fmt.Sprintf("MemoryMax=%dM", probData.MemoryLimitMb),
+					binaryPath,
+				)
 				output, runErr := cmd.CombinedOutput()
 				outputStr := string(output)
 
@@ -215,7 +235,11 @@ func main() {
 					fmt.Println(lipgloss.NewStyle().Foreground(errorColor).Bold(true).
 						Render("🚨 Sandbox binary produced no output at all."))
 					if runErr != nil {
-						fmt.Printf("   Execution error: %v\n", runErr)
+						if strings.Contains(runErr.Error(), "signal: killed") {
+							fmt.Printf("   Execution error: MEMORY LIMIT EXCEEDED (> %d MB)\n", probData.MemoryLimitMb)
+						} else {
+							fmt.Printf("   Execution error: %v\n", runErr)
+						}
 					} else {
 						fmt.Println("   The process exited cleanly but printed nothing — check runner_main.go for a silent early return or an empty rawCases/rawExpecteds payload.")
 					}
@@ -270,8 +294,9 @@ func main() {
 
 			} else {
 				// Standard CF / AtCoder: execute each case, collect result.
+				// Standard CF / AtCoder: execute each case, collect result.
 				for i, testCase := range probData.Tests {
-					res := runner.ExecuteTest(i+1, binaryPath, testCase, probData.TimeLimitMs)
+					res := runner.ExecuteTest(i+1, binaryPath, testCase, probData.TimeLimitMs, probData.MemoryLimitMb)
 					if res.TimedOut || !res.Passed {
 						allPassed = false
 					}
@@ -323,6 +348,8 @@ func main() {
 			addCustomTestCase(probData)
 		case "remove":
 			removeCustomTestCase(probData)
+		case "runall":
+			runAllCSESTests(probData, solutionFile)
 		case "reload":
 			fmt.Println("\n Fetching fresh problem payload from clipboard...")
 			if loadFromClipboard() {
@@ -435,6 +462,114 @@ func removeCustomTestCase(probData *parser.ProblemData) {
 	pause(reader)
 }
 
+// runAllCSESTests compiles the current solution once, then runs it against
+// every N.in/N.out pair in the local CSES test bank for probData.ProblemID
+// (see internal/runner/csesbank.go). Passing cases update a single live
+// counter line in place; a failure freezes that line, prints a truncated
+// diff, and pauses on a [c]ontinue / [o]pen in editor / [s]top prompt
+// before moving on -- "open" writes the FULL untruncated case to a scratch
+// file and shells out to Zed, then re-shows the same prompt.
+func runAllCSESTests(probData *parser.ProblemData, solutionFile string) {
+	reader := bufio.NewReader(os.Stdin)
+
+	fmt.Println("\n ⚙ Compiling for full test bank run...")
+	binaryPath, err := runner.CompileSolution(solutionFile)
+	if err != nil {
+		fmt.Printf(" 🚨 Compile failed:\n%s\n", err.Error())
+		pause(reader)
+		return
+	}
+	defer os.Remove(binaryPath)
+
+	tests, err := runner.LoadCSESTestBank(probData.ProblemID)
+	if err != nil {
+		fmt.Printf(" 🚨 %v\n", err)
+		pause(reader)
+		return
+	}
+
+	total := len(tests)
+	acCount, waCount, tleCount := 0, 0, 0
+
+	fmt.Println()
+caseLoop:
+	for i, tc := range tests {
+		res := runner.ExecuteTest(i+1, binaryPath, tc, probData.TimeLimitMs, probData.MemoryLimitMb)
+
+		if res.Passed {
+			acCount++
+			ui.RenderRunAllProgress(i+1, total, acCount, waCount, tleCount)
+			continue
+		}
+
+		if res.TimedOut {
+			tleCount++
+		} else {
+			waCount++
+		}
+		fmt.Println() // end the live counter line before printing the diff below it
+
+		ui.RenderRunAllFailure(res.CaseNum, res.TimedOut, res.Input, res.Expected, res.Got)
+
+		for {
+			fmt.Print(" [c] continue   [o] open in Zed   [s] stop\n")
+			switch readSingleKey() {
+			case 'o', 'O':
+				path, writeErr := writeFailureScratchFile(res.CaseNum, res.Input, res.Expected, res.Got)
+				if writeErr != nil {
+					fmt.Printf(" 🚨 Could not write scratch file: %v\n", writeErr)
+					continue // retry the prompt, not the outer test loop
+				}
+				if startErr := exec.Command("zed", path).Start(); startErr != nil {
+					fmt.Printf(" 🚨 Could not launch zed: %v\n", startErr)
+				}
+				// Loop again -- opening the file doesn't resolve continue/stop by itself.
+			case 's', 'S':
+				fmt.Printf("\n Stopped at %d/%d (%d AC, %d WA, %d TLE).\n", i+1, total, acCount, waCount, tleCount)
+				pause(reader)
+				return
+			default: // 'c'/'C' or anything else — treat as continue
+				fmt.Println()
+				continue caseLoop
+			}
+		}
+	}
+
+	fmt.Println()
+	ui.RenderRunAllSummary(acCount, total)
+	pause(reader)
+}
+
+// writeFailureScratchFile writes the FULL (untruncated) input/expected/got
+// for one failing case to a temp file, in the shape asked for: INPUT: /
+// EXPECTED OUTPUT: / PROGRAM OUTPUT:, so it can be opened directly in an
+// editor for a closer look.
+func writeFailureScratchFile(caseNum int, input, expected, got string) (string, error) {
+	path := filepath.Join(os.TempDir(), fmt.Sprintf("go-cp-cli-wa-case-%d.txt", caseNum))
+	content := fmt.Sprintf("INPUT:\n%s\n\nEXPECTED OUTPUT:\n%s\n\nPROGRAM OUTPUT:\n%s\n", input, expected, got)
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// readSingleKey reads one raw keypress without waiting for Enter. Used for
+// the lightweight [c]/[o]/[s] prompt during Run All instead of the full
+// arrow-key menu, so a failure doesn't force a full redraw to respond to.
+func readSingleKey() byte {
+	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+	if err != nil {
+		return 's' // fail safe: stop rather than loop forever on a broken terminal
+	}
+	defer term.Restore(int(os.Stdin.Fd()), oldState)
+
+	buf := make([]byte, 1)
+	if _, err := os.Stdin.Read(buf); err != nil {
+		return 's'
+	}
+	return buf[0]
+}
+
 // readMultiline reads lines until one contains only "###".
 func readMultiline(reader *bufio.Reader) string {
 	var sb strings.Builder
@@ -471,11 +606,11 @@ func pause(reader *bufio.Reader) {
 // extractIntAfterLabel scans harness stdout for a line like "EXECUTED_CASES: 3"
 // and returns the parsed integer, or ok=false if the label wasn't found/parseable.
 func extractIntAfterLabel(output, label string) (int, bool) {
-	idx := strings.Index(output, label)
-	if idx == -1 {
+	_, after, ok := strings.Cut(output, label)
+	if !ok {
 		return 0, false
 	}
-	rest := strings.TrimSpace(output[idx+len(label):])
+	rest := strings.TrimSpace(after)
 	// Take digits up to the next non-digit (newline, space, etc.)
 	end := 0
 	for end < len(rest) && rest[end] >= '0' && rest[end] <= '9' {

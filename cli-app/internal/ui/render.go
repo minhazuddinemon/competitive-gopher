@@ -52,8 +52,8 @@ func justifyThree(left, mid, right string, totalWidth int) string {
 	mw := lipgloss.Width(mid)
 	rw := lipgloss.Width(right)
 
-	midStart := max((totalWidth - mw) / 2, lw + 2)
-	rightStart := max(totalWidth - rw, midStart + mw + 2)
+	midStart := max((totalWidth-mw)/2, lw+2)
+	rightStart := max(totalWidth-rw, midStart+mw+2)
 
 	gap1 := max(midStart-lw, 1)
 	gap2 := max(rightStart-(midStart+mw), 1)
@@ -228,6 +228,86 @@ func summaryStr(allPassed, copiedToClipboard bool) string {
 	return " " + lipgloss.NewStyle().Bold(true).
 		Foreground(ColorDarkBg).Background(ColorError).
 		Padding(0, 3).Render("  SOME TESTS FAILED")
+}
+
+// ─── Run All (local test bank) ────────────────────────────────────────────
+
+// RenderRunAllProgress prints (or, on repeat calls, overwrites in place via
+// \r) the live "Run All" counter line. Call it after every passing test
+// case; a failing case should end this line with a plain fmt.Println()
+// first, then use RenderRunAllFailure instead.
+func RenderRunAllProgress(current, total, acCount, waCount, tleCount int) {
+	line := fmt.Sprintf("Running... %d/%d · %d AC", current, total, acCount)
+	if waCount > 0 {
+		line += fmt.Sprintf(" · %d WA", waCount)
+	}
+	if tleCount > 0 {
+		line += fmt.Sprintf(" · %d TLE", tleCount)
+	}
+	styled := lipgloss.NewStyle().Bold(true).Foreground(ColorGopherAccent).Render(line)
+	fmt.Printf("\r %s", styled)
+}
+
+// RenderRunAllFailure prints one failing case's status badge and diff
+// during a "Run All" pass, reusing the same diff box layout as the normal
+// per-case view. Each field is truncated for display only (a long CSES
+// stress-test input/output would otherwise flood the terminal) -- the
+// caller is responsible for writing the FULL untruncated data to the
+// "open in editor" scratch file separately.
+func RenderRunAllFailure(caseNum int, timedOut bool, input, expected, got string) {
+	status := waBadge
+	if timedOut {
+		status = tleBadge
+	}
+	caseLabel := lipgloss.NewStyle().Bold(true).Render(fmt.Sprintf("case #%d", caseNum))
+	fmt.Printf(" %s  %s\n", status, caseLabel)
+	fmt.Println(diffBlockStr(
+		truncateForDisplay(input),
+		truncateForDisplay(expected),
+		truncateForDisplay(got),
+		lineWidth-4,
+	))
+}
+
+// RenderRunAllSummary prints the final "X/Y passed" banner after a Run All
+// pass finishes or is stopped early.
+func RenderRunAllSummary(passed, total int) {
+	if passed == total {
+		fmt.Println(summaryStr(true, false))
+		return
+	}
+	label := fmt.Sprintf("  %d/%d PASSED", passed, total)
+	fmt.Println(" " + lipgloss.NewStyle().Bold(true).
+		Foreground(ColorDarkBg).Background(ColorError).
+		Padding(0, 3).Render(label))
+}
+
+// truncateForDisplay caps a field to maxLines lines and maxChars
+// characters, appending a marker when either limit trims something. This
+// is purely a terminal-rendering concern -- the scratch file written for
+// "open in editor" always gets the untruncated original.
+func truncateForDisplay(s string) string {
+	const maxLines = 15
+	const maxChars = 800
+
+	truncated := false
+
+	lines := strings.Split(s, "\n")
+	if len(lines) > maxLines {
+		lines = lines[:maxLines]
+		truncated = true
+	}
+	out := strings.Join(lines, "\n")
+
+	if len(out) > maxChars {
+		out = out[:maxChars]
+		truncated = true
+	}
+
+	if truncated {
+		out += "\n… (truncated for display)"
+	}
+	return out
 }
 
 // ─── Menu chrome ─────────────────────────────────────────────────────────────

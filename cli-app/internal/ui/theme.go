@@ -12,7 +12,10 @@ var (
 	// as invisible/"dim" as a pill background or menu-highlight color on a dark
 	// terminal (dark text on dark background). Lightened here for usability;
 	// change it back to #222222 if you'd rather have exact brand accuracy over legibility.
-	ColorLeetCode     = lipgloss.Color("#FFA116")
+	ColorLeetCode = lipgloss.Color("#FFA116")
+	ColorCSES     = lipgloss.Color("#5DADE2") // CSES doesn't have a strong published brand color (its site leans
+	// on minimal black/white); a clean sky blue chosen to read well against a dark terminal -- change here if you'd
+	// rather use something else.
 	ColorGopherAccent = lipgloss.Color("#00ADD8") // Go's own brand cyan, for app chrome
 
 	ColorSuccess = lipgloss.Color("#50FA7B")
@@ -35,6 +38,7 @@ var platforms = map[string]PlatformTheme{
 	"codeforces": {Name: "Codeforces", Color: ColorCodeforces, IconName: "codeforces"},
 	"atcoder":    {Name: "AtCoder", Color: ColorAtCoder, IconName: "atcoder"},
 	"leetcode":   {Name: "LeetCode", Color: ColorLeetCode, IconName: "leetcode"},
+	"cses":       {Name: "CSES", Color: ColorCSES, IconName: "cses"},
 }
 
 // ThemeFor returns the theme for a platform key ("codeforces", "atcoder",
