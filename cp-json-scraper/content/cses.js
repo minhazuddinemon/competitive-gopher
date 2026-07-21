@@ -74,12 +74,19 @@ async function scrapeCSES() {
   }
 }
 
-// extractExampleTests walks the DOM starting at the "Example"/"Examples"
+// extractExampleTests walks the DOM starting at each "Example"/"Examples"
 // heading, and collects <pre> blocks up to the next heading (or end of
 // content). The heading level isn't assumed to be h2 -- CSES may render
 // title and section headers (Input/Output/Constraints/Example) at the
-// same level, so all of h1-h4 are searched and the walk stops at the
+// same level, so all of h1-h4 are searched and each walk stops at the
 // next heading of ANY level, not specifically h2.
+//
+// Some problems have a single "Example" heading covering all cases (e.g.
+// #1068); others number each one separately -- "Example 1", "Example 2",
+// etc. (e.g. #1070) -- so ALL matching headings are collected and walked,
+// not just the first. Because each walk stops at the next heading
+// regardless of what it is, a numbered "Example 2" heading naturally ends
+// "Example 1"'s walk without any special-casing.
 //
 // Each <pre> is labeled by the text of its own preceding <p> ("Input:" /
 // "Output:") rather than assumed by strict alternating position, so a
@@ -87,49 +94,53 @@ async function scrapeCSES() {
 // mis-pair input/output.
 function extractExampleTests() {
   const HEADING_TAGS = ["H1", "H2", "H3", "H4"];
-  const headings = Array.from(document.querySelectorAll("h1,h2,h3,h4"));
-  const exampleHeading = headings.find((h) =>
-    /^examples?$/i.test(h.innerText.trim()),
+  const allHeadings = Array.from(document.querySelectorAll("h1,h2,h3,h4"));
+  const exampleHeadings = allHeadings.filter((h) =>
+    /^examples?(\s*\d+)?:?$/i.test(h.innerText.trim()),
   );
-  if (!exampleHeading) {
+
+  if (exampleHeadings.length === 0) {
     console.error(
-      "CSES scraping: no 'Example'/'Examples' heading found among h1-h4.",
+      "CSES scraping: no 'Example'/'Examples' heading(s) found among h1-h4.",
     );
     return [];
   }
 
   const tests = [];
-  let pendingLabel = null; // "input" | "output" | null
-  let pendingInput = null;
 
-  let node = exampleHeading.nextElementSibling;
-  while (node && !HEADING_TAGS.includes(node.tagName)) {
-    const tag = node.tagName;
+  for (const heading of exampleHeadings) {
+    let pendingLabel = null; // "input" | "output" | null
+    let pendingInput = null;
 
-    if (tag === "P") {
-      const text = node.innerText.toLowerCase();
-      if (text.includes("input")) pendingLabel = "input";
-      else if (text.includes("output")) pendingLabel = "output";
-    } else if (tag === "PRE") {
-      const content = node.innerText;
-      if (pendingLabel === "input") {
-        pendingInput = content;
-      } else if (pendingLabel === "output" && pendingInput !== null) {
-        tests.push({
-          input: pendingInput.trim() + "\n",
-          expected: content.trim() + "\n",
-        });
-        pendingInput = null;
+    let node = heading.nextElementSibling;
+    while (node && !HEADING_TAGS.includes(node.tagName)) {
+      const tag = node.tagName;
+
+      if (tag === "P") {
+        const text = node.innerText.toLowerCase();
+        if (text.includes("input")) pendingLabel = "input";
+        else if (text.includes("output")) pendingLabel = "output";
+      } else if (tag === "PRE") {
+        const content = node.innerText;
+        if (pendingLabel === "input") {
+          pendingInput = content;
+        } else if (pendingLabel === "output" && pendingInput !== null) {
+          tests.push({
+            input: pendingInput.trim() + "\n",
+            expected: content.trim() + "\n",
+          });
+          pendingInput = null;
+        }
+        pendingLabel = null;
       }
-      pendingLabel = null;
-    }
 
-    node = node.nextElementSibling;
+      node = node.nextElementSibling;
+    }
   }
 
   if (tests.length === 0) {
     console.error(
-      "CSES scraping: found the Example heading but no Input/Output <pre> pairs under it.",
+      "CSES scraping: found Example heading(s) but no Input/Output <pre> pairs under them.",
     );
   }
 
