@@ -30,7 +30,6 @@ type MenuItem struct {
 // through here instead -- otherwise the terminal gets left on the
 // alternate screen buffer after the process dies.
 func exitApp(code int) {
-	fmt.Print("\x1b[?1049l")
 	os.Exit(code)
 }
 
@@ -42,7 +41,6 @@ func main() {
 	// live in a compositor layer that a plain "erase screen" doesn't
 	// reliably clear; symbols are ordinary text and the alt screen gives
 	// every redraw a clean slate regardless.
-	fmt.Print("\x1b[?1049h")
 
 	// Base System Color Palettes (still used for compile/menu chrome that
 	// isn't part of the per-platform test-case rendering, which goes
@@ -87,6 +85,8 @@ func main() {
 
 	// Main Persistent State Machine Loop
 	for {
+		// New line: 2J clears visible, 3J clears scrollback, H moves cursor to home
+		fmt.Print("\x1b[2J\x1b[3J\x1b[H")
 		// Rebuilt every iteration (not once, before the loop) because
 		// "Reload from Clipboard" can change probData.Platform/ProblemID
 		// mid-session, and Run All Test Cases should only appear when a
